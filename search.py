@@ -143,6 +143,23 @@ def count_occurrences(file_path, search_term):
     except Exception as e:
         print(f"Could not process file {file_path}: {e}")
         return 0
+    
+
+def list_directory(root_dir):
+    with open('DCRB_listing.txt', 'w', encoding='utf-8') as f:
+        for root, dirs, files in os.walk(root_dir):
+            level = root.replace(root_dir, '').count(os.sep)
+            indent = ' ' * 4 * level
+            f.write('{}{}/\n'.format(indent, os.path.basename(root)))
+            subindent = ' ' * 4 * (level + 1)
+            for file in files:
+                f.write('{}{}\n'.format(subindent, file))
+
+# Replace this path with the actual path to your DCRB directory
+dcrb_path = r"C:\level1\level2\level3\DCRB"
+
+list_directory(dcrb_path)
+
 
 def search_files(connection, start_path, search_term):
     cursor = connection.cursor()
