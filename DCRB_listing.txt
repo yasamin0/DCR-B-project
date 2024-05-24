@@ -286,8 +286,6 @@ DCRB/
             wikipedia-wordmark-en.svg
             wikipedia.png
         DCRB-2/
-            Abstract machine - Wikipedia.html
-            Cognitive psychology - Wikipedia.html
             Creativity - Wikipedia.html
             Distance - Wikipedia.html
             Domain of a function - Wikipedia.html
@@ -297,6 +295,8 @@ DCRB/
             Quantity - Wikipedia.html
             Spatial cognition - Wikipedia.html
             Theory of computation - Wikipedia.html
+            yasamin.html
+            yasamin_hosseinzadeh_sani.html
             Abstract machine - Wikipedia_files/
                 2-state_3-symbol_Turing_Machine.png
                 A_hierarchy_of_abstract_machines.png
