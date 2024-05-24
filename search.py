@@ -2,6 +2,35 @@ import os
 import mysql.connector
 from mysql.connector import Error
 
+def check_subtree_depth(root_dir, min_depth):
+    for root, dirs, files in os.walk(root_dir):
+        depth = root[len(root_dir):].count(os.sep)
+        if depth >= min_depth:
+            return True
+    return False
+
+def verify_dcrb_subtree(root_dir):
+    for root, dirs, files in os.walk(root_dir):
+        if "DCRB" in dirs:
+            dcrb_path = os.path.join(root, "DCRB")
+            if check_subtree_depth(dcrb_path, 4):
+                return dcrb_path
+    return None
+
+def verify_dcrb_contents(dcrb_path):
+    file_count = 0
+    level_count = set()
+    for root, dirs, files in os.walk(dcrb_path):
+        depth = root[len(dcrb_path):].count(os.sep)
+        level_count.add(depth)
+        file_count += len(files)
+       # print(f"Debug: {root} contains {len(files)} files at depth {depth}. Total files so far: {file_count}, Levels: {len(level_count)}")
+        
+        if file_count >= 50 and len(level_count) >= 4:
+            return True
+    return False
+
+
 def connect_to_database():
     try:
         connection = mysql.connector.connect(
@@ -26,7 +55,7 @@ def create_files_table(connection):
             file_type VARCHAR(50),
             file_size BIGINT,
             contents LONGTEXT
-        )
+        ) AUTO_INCREMENT=1
     """)
     
     # Adding indexes only if they don't exist
@@ -54,8 +83,25 @@ def create_files_table(connection):
         else:
             raise e
     
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS search_results (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            file_id INT,
+            path VARCHAR(255),
+            type VARCHAR(50),
+            occurrences INT,
+            search_term VARCHAR(255),
+            size_bytes BIGINT,
+            UNIQUE KEY unique_result_id (id, search_term),
+            FOREIGN KEY (file_id) REFERENCES all_files(id)
+        ) AUTO_INCREMENT=1
+    """)
+    
+    # Reset auto-increment value for search_results table before each search
+    cursor.execute("ALTER TABLE search_results AUTO_INCREMENT = 1")
+    
     cursor.close()
-    print("Table 'all_files' created successfully")
+    print("Tables 'all_files' and 'search_results' created successfully")
 
 def insert_files_into_table(directory, connection):
     cursor = connection.cursor()
@@ -108,6 +154,7 @@ def search_files(connection, start_path, search_term):
     files = cursor.fetchall()
     
     directory_occurrences = {}  # Dictionary to store occurrences per directory
+    result_id = 1  # Initialize result_id for this search
     
     for file_id, file_name, full_path, file_type, file_size in files:
         occurrences = count_occurrences(full_path, search_term)
@@ -123,17 +170,20 @@ def search_files(connection, start_path, search_term):
             
             print(f"File: {file_name}, Path: {full_path}, Occurrences: {occurrences}")
             
+            # Insert search result with result_id incremented for each result
             cursor.execute("""
-                INSERT INTO search_results (id, path, type, occurrences, search_term, size_bytes)
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (file_id, full_path, file_type, occurrences, search_term, file_size))
+                INSERT INTO search_results (id, file_id, path, type, occurrences, search_term, size_bytes)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (result_id, file_id, full_path, file_type, occurrences, search_term, file_size))
+            result_id += 1  # Increment result_id for the next result
     
     # Insert directory occurrences into search_results table
     for directory, occurrences in directory_occurrences.items():
         cursor.execute("""
-            INSERT INTO search_results (path, type, occurrences, search_term, size_bytes)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (directory, 'directory', occurrences, search_term, 0))  # Set size_bytes to 0 for directories
+            INSERT INTO search_results (id, file_id, path, type, occurrences, search_term, size_bytes)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+        """, (result_id, None, directory, 'directory', occurrences, search_term, 0))  # Set size_bytes to 0 for directories
+        result_id += 1  # Increment result_id for the next result
         
     connection.commit()
     cursor.close()
@@ -142,8 +192,23 @@ def main():
     connection = connect_to_database()
     if connection:
         create_files_table(connection)
-        directory = r"C:\level1"  # Adjust the path as needed
+        directory = r"C:\level1"  
         insert_files_into_table(directory, connection)
+
+        # Check subtree depth
+        if not check_subtree_depth(directory, 6):
+            print("Directory tree does not have the required depth of 6.")
+            return
+        
+        dcrb_path = verify_dcrb_subtree(directory)
+        if not dcrb_path:
+            print("DCRB subtree with required depth is not present.")
+            return
+
+        if not verify_dcrb_contents(dcrb_path):
+            print("DCRB subtree does not meet the content requirements.")
+            return
+        
         search_term = input("What are you searching for? ").lower()
         search_files(connection, directory, search_term)
         connection.close()
