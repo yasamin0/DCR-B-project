@@ -24,12 +24,9 @@ def verify_dcrb_contents(dcrb_path):
         depth = root[len(dcrb_path):].count(os.sep)
         level_count.add(depth)
         file_count += len(files)
-       # print(f"Debug: {root} contains {len(files)} files at depth {depth}. Total files so far: {file_count}, Levels: {len(level_count)}")
-        
         if file_count >= 50 and len(level_count) >= 4:
             return True
     return False
-
 
 def connect_to_database():
     try:
@@ -58,11 +55,10 @@ def create_files_table(connection):
         ) AUTO_INCREMENT=1
     """)
     
-    # Adding indexes only if they don't exist
     try:
         cursor.execute("CREATE INDEX idx_filename ON all_files(file_name)")
     except mysql.connector.errors.ProgrammingError as e:
-        if e.errno == 1061:  # Error number for duplicate key name
+        if e.errno == 1061:
             print("Index 'idx_filename' already exists.")
         else:
             raise e
@@ -97,7 +93,6 @@ def create_files_table(connection):
         ) AUTO_INCREMENT=1
     """)
     
-    # Reset auto-increment value for search_results table before each search
     cursor.execute("ALTER TABLE search_results AUTO_INCREMENT = 1")
     
     cursor.close()
@@ -106,7 +101,7 @@ def create_files_table(connection):
 def insert_files_into_table(directory, connection):
     cursor = connection.cursor()
     cursor.execute("SELECT COUNT(*) FROM all_files")
-    if cursor.fetchone()[0] == 0:  # If the table is empty, then populate it
+    if cursor.fetchone()[0] == 0:
         print("Populating 'all_files' table...")
         for root, _, files in os.walk(directory):
             for file in files:
@@ -114,7 +109,6 @@ def insert_files_into_table(directory, connection):
                 file_name, file_extension = os.path.splitext(file)
                 file_size = os.path.getsize(file_path)
                 
-                # Read contents only for specific file types
                 content = None
                 if file_extension.lower() in ('.html', '.htm', '.txt', '.pdf', '.doc', '.docx'):
                     try:
@@ -123,7 +117,6 @@ def insert_files_into_table(directory, connection):
                     except Exception as e:
                         print(f"Error reading file {file_path}: {e}")
                 
-                # Insert file details and contents into the database
                 cursor.execute("""
                     INSERT INTO all_files (file_name, full_path, file_type, file_size, contents)
                     VALUES (%s, %s, %s, %s, %s)
@@ -143,9 +136,12 @@ def count_occurrences(file_path, search_term):
     except Exception as e:
         print(f"Could not process file {file_path}: {e}")
         return 0
-    
 
 def list_directory(root_dir):
+    if not os.path.exists(root_dir):
+        print("DCRB directory not found.")
+        return
+    
     with open('DCRB_listing.txt', 'w', encoding='utf-8') as f:
         for root, dirs, files in os.walk(root_dir):
             level = root.replace(root_dir, '').count(os.sep)
@@ -154,14 +150,14 @@ def list_directory(root_dir):
             subindent = ' ' * 4 * (level + 1)
             for file in files:
                 f.write('{}{}\n'.format(subindent, file))
+    print("DCRB directory listing created.")
 
 # Replace this path with the actual path to your DCRB directory
 dcrb_path = r"C:\level1\level2\level3\DCRB"
 
 list_directory(dcrb_path)
 
-
-def search_files(connection, start_path, search_term):
+def search_files(connection, search_term):
     cursor = connection.cursor()
     
     # Clear previous search results
@@ -170,14 +166,30 @@ def search_files(connection, start_path, search_term):
     cursor.execute("SELECT id, file_name, full_path, file_type, file_size FROM all_files")
     files = cursor.fetchall()
     
+    if not files:
+        print("No files found in the database.")
+        return
+    
     directory_occurrences = {}  # Dictionary to store occurrences per directory
     result_id = 1  # Initialize result_id for this search
+    found_any = False  # Track if any matches are found
     
     for file_id, file_name, full_path, file_type, file_size in files:
+        # Check if the search term is in the file name
+        if search_term.lower() in file_name.lower():
+            found_any = True
+            print(f"File name match: {file_name}, Path: {full_path}")
+            cursor.execute("""
+                INSERT INTO search_results (id, file_id, path, type, occurrences, search_term, size_bytes)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (result_id, file_id, full_path, 'filename', 0, search_term, file_size))
+            result_id += 1
+        
+        # Check if the search term is in the file content
         occurrences = count_occurrences(full_path, search_term)
         if occurrences > 0:
+            found_any = True
             if os.path.isdir(full_path):
-                # For directories, store them as path and type as 'directory'
                 directory = full_path
                 file_type = 'directory'
             else:
@@ -185,9 +197,8 @@ def search_files(connection, start_path, search_term):
             
             directory_occurrences[directory] = directory_occurrences.get(directory, 0) + occurrences
             
-            print(f"File: {file_name}, Path: {full_path}, Occurrences: {occurrences}")
+            print(f"File content match: {file_name}, Path: {full_path}, Occurrences: {occurrences}")
             
-            # Insert search result with result_id incremented for each result
             cursor.execute("""
                 INSERT INTO search_results (id, file_id, path, type, occurrences, search_term, size_bytes)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
@@ -201,15 +212,20 @@ def search_files(connection, start_path, search_term):
             VALUES (%s, %s, %s, %s, %s, %s, %s)
         """, (result_id, None, directory, 'directory', occurrences, search_term, 0))  # Set size_bytes to 0 for directories
         result_id += 1  # Increment result_id for the next result
-        
+    
     connection.commit()
     cursor.close()
+    
+    if not found_any:
+        print("No matching files found.")
+    else:
+        print("Search results have been updated.")
 
 def main():
     connection = connect_to_database()
     if connection:
         create_files_table(connection)
-        directory = r"C:\level1"  
+        directory = r"C:\level1"
         insert_files_into_table(directory, connection)
 
         # Check subtree depth
@@ -227,7 +243,7 @@ def main():
             return
         
         search_term = input("What are you searching for? ").lower()
-        search_files(connection, directory, search_term)
+        search_files(connection, search_term)
         connection.close()
         print("Search completed.")
 
